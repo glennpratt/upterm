@@ -67,6 +67,7 @@ var (
 	flagAccept           bool
 	flagSkipHostKeyCheck bool
 	flagNoSFTP           bool
+	flagAllowExec        bool
 )
 
 func hostCmd() *cobra.Command {
@@ -124,6 +125,7 @@ containing client public keys.`,
 	cmd.PersistentFlags().BoolVar(&flagHideClientIP, "hide-client-ip", false, "Hide client IP addresses from output (auto-enabled in CI environments).")
 	cmd.PersistentFlags().BoolVar(&flagSkipHostKeyCheck, "skip-host-key-check", false, "Automatically accept unknown server host keys and add them to known_hosts (similar to SSH's StrictHostKeyChecking=accept-new). This bypasses host key verification for new connections.")
 	cmd.PersistentFlags().BoolVar(&flagNoSFTP, "no-sftp", false, "Disable file transfer via SFTP/SCP. By default, clients can transfer files with the same access as the terminal session.")
+	cmd.PersistentFlags().BoolVar(&flagAllowExec, "allow-exec", false, "Allow clients to run non-interactive exec commands (e.g. ssh user@host 'some-command') in addition to the shared PTY session.")
 
 	return cmd
 }
@@ -282,8 +284,9 @@ func shareRunE(c *cobra.Command, args []string) error {
 		Stdin:                  os.Stdin,
 		Stdout:                 os.Stdout,
 		Logger:                 logger.Logger,
-		ReadOnly:              flagReadOnly,
-		SFTPDisabled:          flagNoSFTP,
+		ReadOnly:               flagReadOnly,
+		AllowExec:              flagAllowExec,
+		SFTPDisabled:           flagNoSFTP,
 		SFTPPermissionChecker: sftpPermissionChecker,
 	}
 

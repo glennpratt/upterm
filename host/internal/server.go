@@ -35,6 +35,7 @@ type Server struct {
 	Stdout            *os.File
 	Logger            *slog.Logger
 	ReadOnly          bool
+	AllowExec         bool
 	// ForceForwardingInputForTesting forces stdin forwarding even when stdin is not a TTY.
 	// This is used in tests where stdin is a pipe but we still want to forward test data.
 	ForceForwardingInputForTesting bool
@@ -95,6 +96,7 @@ func (s *Server) ServeWithContext(ctx context.Context, l net.Listener) error {
 			ctx:                   ctx,
 			logger:                s.Logger,
 			readonly:              s.ReadOnly,
+			allowExec:             s.AllowExec,
 			sftpPermissionChecker: s.SFTPPermissionChecker,
 		}
 		ph := publicKeyHandler{
@@ -180,6 +182,7 @@ type sessionHandler struct {
 	ctx               context.Context
 	logger            *slog.Logger
 	readonly          bool
+	allowExec         bool
 
 	// SFTP configuration
 	sftpPermissionChecker sftp.PermissionChecker // Optional: prompts user for SFTP permissions
@@ -191,8 +194,13 @@ func (h *sessionHandler) HandleSession(sess gssh.Session) {
 
 	ptyReq, winCh, isPty := sess.Pty()
 	if !isPty {
+		if h.allowExec && len(sess.Command()) > 0 {
+			h.handleExec(sess)
+			return
+		}
 		_, _ = io.WriteString(sess, "PTY is required.\n")
 		_ = sess.Exit(1)
+		return
 	}
 
 	var (
@@ -324,6 +332,25 @@ func emitClientJoinEvent(eventEmmiter *emitter.Emitter, sessionID string, auth *
 
 func emitClientLeftEvent(eventEmmiter *emitter.Emitter, sessionID string) {
 	eventEmmiter.Emit(upterm.EventClientLeft, sessionID)
+}
+
+func (h *sessionHandler) handleExec(sess gssh.Session) {
+	args := sess.Command()
+	cmd := exec.CommandContext(h.ctx, args[0], args[1:]...)
+	cmd.Env = append(os.Environ(), fmt.Sprintf("SSH_ORIGINAL_COMMAND=%s", sess.RawCommand()))
+	cmd.Stdin = sess
+	cmd.Stdout = sess
+	cmd.Stderr = sess.Stderr()
+
+	if err := cmd.Run(); err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			_ = sess.Exit(exitError.ExitCode())
+		} else {
+			_ = sess.Exit(1)
+		}
+		return
+	}
+	_ = sess.Exit(0)
 }
 
 func startAttachCmd(ctx context.Context, c []string, term string) (PTY, error) {

@@ -205,6 +205,7 @@ type Host struct {
 	Stdin                          *os.File
 	Stdout                         *os.File
 	ReadOnly                       bool
+	AllowExec                      bool
 	ForceForwardingInputForTesting bool
 
 	// SFTP configuration
@@ -381,6 +382,7 @@ func (c *Host) Run(ctx context.Context) error {
 			Stdout:                         c.Stdout,
 			Logger:                         logger.With("component", "server"),
 			ReadOnly:                       c.ReadOnly,
+			AllowExec:                      c.AllowExec,
 			ForceForwardingInputForTesting: c.ForceForwardingInputForTesting,
 			SFTPDisabled:                   c.SFTPDisabled,
 			SFTPPermissionChecker:          c.SFTPPermissionChecker,
