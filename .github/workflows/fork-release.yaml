@@ -1,0 +1,48 @@
+name: Fork Release
+# A fork's release: the same archives an upstream release has, built by the
+# same goreleaser config, published as a prerelease on this repository and
+# nowhere else -- no Docker images, Homebrew cask, Scoop manifest or deploy,
+# which belong to owenthereal/upterm and need its secrets. release.yaml skips
+# outside owenthereal/upterm, and this skips inside it.
+on:
+  push:
+    tags:
+      - 'v*'
+permissions:
+  contents: write
+jobs:
+  release:
+    if: github.repository != 'owenthereal/upterm'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: Build with GoReleaser
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean --skip=publish,docker
+        env:
+          DOCKER_REPO: ghcr.io/${{ github.repository }}/uptermd
+
+      - name: Publish a prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cd dist
+          # Everything checksums.txt vouches for, and checksums.txt itself.
+          mapfile -t assets < <(awk '{print $2}' checksums.txt)
+          gh release create "$TAG" "${assets[@]}" checksums.txt \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --prerelease \
+            --title "Upterm ${TAG#v} (${GITHUB_REPOSITORY})" \
+            --notes "Built from ${GITHUB_SHA} by .github/workflows/fork-release.yaml. Not an upstream release."

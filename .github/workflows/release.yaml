@@ -9,6 +9,9 @@ permissions:
 jobs:
   build-and-release:
     name: Release binaries and Docker images
+    # Publishes to owenthereal's registries and deploys its app, with its
+    # secrets: a fork's tags use fork-release.yaml instead.
+    if: github.repository == 'owenthereal/upterm'
     uses: ./.github/workflows/build-and-release.yaml
     with:
       snapshot: false
