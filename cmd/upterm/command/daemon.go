@@ -211,6 +211,7 @@ func buildDaemonHost(ctx context.Context, name string, opts hostOptions, child *
 		Logger:                  logger,
 		ReadOnly:                flagReadOnly,
 		AllowLocalTCPForwarding: flagAllowLocalTCPForwarding,
+		AllowExec:               flagAllowExec,
 		PtySize:                 opts.ptySize,
 		PinPtySize:              flagPtySize != "",
 		Term:                    opts.term,

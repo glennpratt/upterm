@@ -1,12 +1,14 @@
 package ftests
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
@@ -17,6 +19,7 @@ import (
 	"github.com/owenthereal/upterm/upterm"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/ssh"
 )
 
 func testHostNoAuthorizedKeyAnyClientJoin(t *testing.T, hostShareURL, hostNodeAddr, clientJoinURL string) {
@@ -298,6 +301,49 @@ func testClientAttachReadOnly(t *testing.T, hostShareURL, hostNodeAddr, clientJo
 		return
 	}
 
+}
+
+// testClientExecThroughTheRelay runs a guest's command with no terminal end to
+// end, through the relay, beside the guest's own terminal on the same
+// connection: its stdout, its stderr and its status come back apart, as they
+// would from sshd.
+func testClientExecThroughTheRelay(t *testing.T, hostShareURL, hostNodeAddr, clientJoinURL string) {
+	if runtime.GOOS == "windows" {
+		t.Skip("--allow-exec is not supported on Windows")
+	}
+	require := require.New(t)
+
+	adminSocketFile := setupAdminSocket(t)
+
+	h := &Host{
+		Command:                  getTestShell(),
+		PrivateKeys:              []string{HostPrivateKey},
+		AdminSocketFile:          adminSocketFile,
+		PermittedClientPublicKey: ClientPublicKeyContent,
+		AllowExec:                true,
+	}
+	require.NoError(h.Share(hostShareURL))
+	defer h.Close()
+
+	session := getAndVerifySession(t, adminSocketFile, hostShareURL, hostNodeAddr)
+
+	c := &Client{PrivateKeys: []string{ClientPrivateKey}}
+	require.NoError(c.Join(session, clientJoinURL))
+	defer c.Close()
+
+	sess, err := c.sshClient.NewSession()
+	require.NoError(err)
+	defer func() { _ = sess.Close() }()
+	var stdout, stderr bytes.Buffer
+	sess.Stdout, sess.Stderr = &stdout, &stderr
+	// Syntax every sh-like $SHELL takes: these cases run in parallel, so the
+	// test can't pin SHELL for the host.
+	err = sess.Run(`printf 'one\n' | tr a-z A-Z; echo oops >&2; exit 3`)
+	var exit *ssh.ExitError
+	require.ErrorAs(err, &exit)
+	require.Equal(3, exit.ExitStatus())
+	require.Equal("ONE\n", stdout.String())
+	require.Equal("oops\n", stderr.String())
 }
 
 func testClientLocalPortForward(t *testing.T, hostShareURL, hostNodeAddr, clientJoinURL string) {

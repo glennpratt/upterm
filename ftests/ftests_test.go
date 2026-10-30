@@ -192,6 +192,7 @@ var ConnectionTestCases = []FtestCase{
 	testClientAttachReadOnly,
 	testClientLocalPortForwardDisabled,
 	testClientLocalPortForward,
+	testClientExecThroughTheRelay,
 	testGuestKeepaliveIsAnswered,
 	testClientSlowGuestDropped,
 	testClientSurvivesBurstWithoutPrimary,
@@ -749,6 +750,7 @@ type Host struct {
 	PermittedClientPublicKey string
 	HostKeyCallback          ssh.HostKeyCallback
 	AllowLocalTCPForwarding  bool
+	AllowExec                bool
 	ReadOnly                 bool
 	SFTPDisabled             bool // Disable SFTP subsystem
 	HideClientIP             bool
@@ -874,6 +876,7 @@ func (c *Host) Share(url string) error {
 		Logger:                  logger,
 		HostKeyCallback:         c.HostKeyCallback,
 		AllowLocalTCPForwarding: c.AllowLocalTCPForwarding,
+		AllowExec:               c.AllowExec,
 		ReadOnly:                c.ReadOnly,
 		SFTPDisabled:            c.SFTPDisabled,
 		HideClientIP:            c.HideClientIP,

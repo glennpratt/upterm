@@ -206,6 +206,23 @@ func TestProblemsAreSortedByKeyWhateverFoundThem(t *testing.T) {
 	require.Contains(t, errs[3].Error(), `unknown key "zzz"`)
 }
 
+// allow-exec is checked against read-only and force-command as host checks
+// the flags.
+func TestConfigChecksAllowExecAgainstReadOnlyAndForceCommand(t *testing.T) {
+	restoreFlags(t)
+	errs := validateConfigFile(Root(), writeConfig(t, "allow-exec: true\nread-only: true\n"))
+	require.Len(t, errs, 1)
+	require.Contains(t, errs[0].Error(), "--read-only and --allow-exec cannot be used together")
+
+	restoreFlags(t)
+	errs = validateConfigFile(Root(), writeConfig(t, "allow-exec: true\nforce-command: tmux attach\n"))
+	require.Len(t, errs, 1)
+	require.Contains(t, errs[0].Error(), "--force-command and --allow-exec cannot be used together")
+
+	restoreFlags(t)
+	require.Empty(t, validateConfigFile(Root(), writeConfig(t, "allow-exec: true\n")))
+}
+
 // A file hosting accepts has no problems, however it spells its values.
 func TestAFileCommandsAcceptHasNoProblems(t *testing.T) {
 	restoreFlags(t)

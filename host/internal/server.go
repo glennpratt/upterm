@@ -82,6 +82,12 @@ type Server struct {
 	PinPtySize              bool
 	Term                    string
 
+	// AllowExec runs a guest's exec request without a pty -- `ssh <session>
+	// 'cmd'` -- as a process of its own, through $SHELL -c, instead of
+	// refusing it for wanting no terminal (see handleExec). Never with
+	// ForceCommand or ReadOnly; the CLI refuses both combinations.
+	AllowExec bool
+
 	// AwaitInitialClient defers starting the command until the first host
 	// client's output subscription is installed, and defers serving guests
 	// until the command has started. Foreground use sets it: a command that
@@ -297,6 +303,7 @@ func (s *Server) ServeWithContext(ctx context.Context, guest, host net.Listener)
 	sh := sessionHandler{
 		forceCommand:          s.ForceCommand,
 		forceCommands:         &guestHandlers{},
+		execs:                 &guestHandlers{},
 		sharedGuests:          &guestHandlers{},
 		hostHandlers:          &guestHandlers{},
 		timing:                timing,
@@ -314,6 +321,7 @@ func (s *Server) ServeWithContext(ctx context.Context, guest, host net.Listener)
 		order:                 &s.order,
 		logger:                s.Logger,
 		readonly:              s.ReadOnly,
+		allowExec:             s.AllowExec,
 		sftpPermissionChecker: s.SFTPPermissionChecker,
 		kind:                  kindGuest,
 		cmdDone:               cmdDone,
@@ -443,6 +451,11 @@ func (s *Server) ServeWithContext(ctx context.Context, guest, host net.Listener)
 			if bound := forceCommandStopBound(sh.timing.hangup, sh.timing.forceCommandStop); !sh.forceCommands.wait(bound) {
 				s.Logger.Warn("gave up waiting for forced commands to end", "bound", bound)
 			}
+			// The same for guests' exec commands, which that cancel hangs up the
+			// same way, and whose guests are each sent the command's status.
+			if bound := forceCommandStopBound(sh.timing.hangup, sh.timing.forceCommandStop); !sh.execs.wait(bound) {
+				s.Logger.Warn("gave up waiting for guests' exec commands to end", "bound", bound)
+			}
 			// And the shared command's guests are each sent the session's
 			// status, as the session's last notice to a client. Each handler
 			// waits up to guestFlushTimeout for its close to be answered, after
@@ -481,6 +494,7 @@ func (s *Server) ServeWithContext(ctx context.Context, guest, host net.Listener)
 		hostSH := sh
 		hostSH.kind = kindHost
 		hostSH.readonly = false
+		hostSH.allowExec = false
 		hostSH.forceCommand = nil
 		hostSH.sftpPermissionChecker = nil
 		hostSH.subsystems = nil
@@ -688,17 +702,33 @@ func (t *guestHandlers) take(sess gssh.Session) func() {
 	return finish
 }
 
-// guestTracker is what the door registers this session's clients with: on the
-// host door, its own; on the guest door, the forced commands' tracker when
-// there is one, the shared command's otherwise. Nil in a test's handler.
-func (h *sessionHandler) guestTracker() *guestHandlers {
+// guestTracker is what the door registers sess's client with: on the host
+// door, its own; on the guest door, the exec commands' tracker for an exec
+// request handleExec serves, the forced commands' tracker when there is one,
+// and the shared command's otherwise. Nil in a test's handler.
+func (h *sessionHandler) guestTracker(sess gssh.Session) *guestHandlers {
 	if h.kind == kindHost {
 		return h.hostHandlers
+	}
+	if h.isExec(sess) {
+		return h.execs
 	}
 	if len(h.forceCommand) > 0 {
 		return h.forceCommands
 	}
 	return h.sharedGuests
+}
+
+// isExec reports whether sess is a guest's exec request that handleExec
+// serves: --allow-exec, a command, and no pty. A pty request comes before its
+// exec request, so this answers the same at the door (admitGuest) as in the
+// handler. An exec request with a pty is a terminal guest, as it always was.
+func (h *sessionHandler) isExec(sess gssh.Session) bool {
+	if !h.allowExec || h.kind != kindGuest || len(h.forceCommand) > 0 || sess.RawCommand() == "" {
+		return false
+	}
+	_, _, isPty := sess.Pty()
+	return !isPty
 }
 
 // admitGuest is the guest door's SessionRequestCallback, which charm calls
@@ -719,7 +749,7 @@ func (h *sessionHandler) guestTracker() *guestHandlers {
 // handler with no trackers -- a test's -- admits everything. The host door
 // admits its clients the same way, with its own tracker.
 func (h *sessionHandler) admitGuest(sess gssh.Session, requestType string) bool {
-	handlers := h.guestTracker()
+	handlers := h.guestTracker(sess)
 	if handlers == nil {
 		return true
 	}
@@ -755,14 +785,14 @@ func (h *sessionHandler) startAdmitted(handle gssh.SubsystemHandler) gssh.Subsys
 // the handler unconditionally (charm.land/ssh v0.4.3 session.go:261-296), and
 // taking the admission is the first thing the handler does.
 func (h *sessionHandler) takeAdmission(sess gssh.Session) func() {
-	handlers := h.guestTracker()
-	if handlers == nil {
-		return nil
-	}
 	// The door's handler is given the session charm admitted wrapped, so
 	// that its output goes straight to the channel; the key is charm's own.
 	if raw, ok := sess.(*rawSession); ok {
 		sess = raw.Session
+	}
+	handlers := h.guestTracker(sess)
+	if handlers == nil {
+		return nil
 	}
 	return handlers.take(sess)
 }
@@ -940,7 +970,9 @@ type sessionHandler struct {
 	stopCtx  context.Context
 	logger   *slog.Logger
 	readonly bool
-	kind     clientKind
+	// allowExec is --allow-exec, on the guest door only (see isExec).
+	allowExec bool
+	kind      clientKind
 
 	// cmdDone closes when the hosted command's Run has returned, and
 	// commandResult reports how it ended. A shared-pty client whose session
@@ -968,6 +1000,9 @@ type sessionHandler struct {
 	// it has gone. Shared by every guest's handler; nil in a test's handler,
 	// which waits for nothing.
 	forceCommands *guestHandlers
+	// execs is the same for guests' exec commands (see handleExec). Nil in a
+	// test's handler.
+	execs *guestHandlers
 	// sharedGuests is the same for the shared command's guests, each of which
 	// is sent the session's status. Nil in a test's handler.
 	sharedGuests *guestHandlers
@@ -1038,6 +1073,11 @@ func (h *sessionHandler) HandleSession(sess gssh.Session) {
 	// session without owning a terminal. It gets no window-change channel,
 	// which the loop below is content with. A guest still needs a pty, because
 	// a guest with no terminal has nothing to show the session on.
+	if h.isExec(sess) {
+		h.handleExec(sess)
+		return
+	}
+
 	if !isPty && h.kind == kindGuest {
 		// With no pty, the guest's ssh client leaves its terminal cooked, so
 		// a bare newline ends the line.

@@ -86,6 +86,20 @@ func Test_hostValueChecks(t *testing.T) {
 	require.NoError(t, validateReadOnlyForwarding(false, true))
 	require.ErrorContains(t, validateReadOnlyForwarding(true, true), "--read-only and --allow-local-tcp-forwarding cannot be used together")
 
+	require.NoError(t, validateReadOnlyExec(false, false))
+	require.NoError(t, validateReadOnlyExec(true, false))
+	require.NoError(t, validateReadOnlyExec(false, true))
+	require.EqualError(t, validateReadOnlyExec(true, true), "--read-only and --allow-exec cannot be used together: a read-only session must not run guests' commands")
+
+	require.NoError(t, validateForceCommandExec("", true))
+	require.NoError(t, validateForceCommandExec("tmux attach", false))
+	require.EqualError(t, validateForceCommandExec("tmux attach", true), "--force-command and --allow-exec cannot be used together: a forced command decides what every guest runs")
+
+	require.NoError(t, validateExecPlatform("linux", true))
+	require.NoError(t, validateExecPlatform("darwin", true))
+	require.NoError(t, validateExecPlatform("windows", false))
+	require.EqualError(t, validateExecPlatform("windows", true), "--allow-exec is not supported on Windows")
+
 	require.NoError(t, validateDetachAccept(false, false))
 	require.NoError(t, validateDetachAccept(false, true))
 	require.NoError(t, validateDetachAccept(true, true))

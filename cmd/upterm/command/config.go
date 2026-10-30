@@ -349,6 +349,8 @@ func checkConfigFile(root *cobra.Command, path string) ([]error, []deprecation) 
 		{[]string{"read-only", "allow-local-tcp-forwarding"}, func() error {
 			return validateReadOnlyForwarding(flagReadOnly, flagAllowLocalTCPForwarding)
 		}},
+		{[]string{"read-only", "allow-exec"}, func() error { return validateReadOnlyExec(flagReadOnly, flagAllowExec) }},
+		{[]string{"force-command", "allow-exec"}, func() error { return validateForceCommandExec(flagForceCommand, flagAllowExec) }},
 		{[]string{"server"}, func() error { return validateServer(flagServer) }},
 		{[]string{"proxy"}, func() error { _, err := parseProxyURL(flagProxy); return err }},
 		{[]string{"escape-char"}, func() error { _, err := parseEscapeChar(flagHostEscapeChar); return err }},
@@ -511,6 +513,11 @@ func exampleConfig() string {
 # When enabled, clients can reach TCP destinations visible to the host.
 # Cannot be combined with read-only.
 # allow-local-tcp-forwarding: false
+
+# Allow clients to run commands without a terminal (ssh SESSION 'cmd') (default: false)
+# Each runs through $SHELL -c in a process of its own, with the host's access.
+# Cannot be combined with read-only or force-command.
+# allow-exec: false
 
 # Auto-accept clients without confirmation (default: false)
 # WARNING: Only use this in trusted environments.

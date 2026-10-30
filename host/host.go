@@ -148,6 +148,9 @@ type Host struct {
 	Logger                  *slog.Logger
 	ReadOnly                bool
 	AllowLocalTCPForwarding bool
+	// AllowExec runs guests' exec requests without a pty as processes of
+	// their own (see internal.Server.AllowExec).
+	AllowExec bool
 	// TunnelCallback is told when the tunnel to the relay is lost, and when
 	// it is back. It is called on a goroutine of the host's own, one event at
 	// a time and in the order they happened, so a callback that takes a while
@@ -1161,6 +1164,7 @@ func (c *Host) Run(ctx context.Context) (runErr error) {
 			Logger:                  logger.With("component", "server"),
 			ReadOnly:                c.ReadOnly,
 			AllowLocalTCPForwarding: c.AllowLocalTCPForwarding,
+			AllowExec:               c.AllowExec,
 			Forwards:                forwards,
 			PtySize:                 c.PtySize,
 			PinPtySize:              c.PinPtySize,

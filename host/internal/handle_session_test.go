@@ -241,7 +241,7 @@ func TestAGuestTurnedAwayWaitsForItsCloseToBeAnswered(t *testing.T) {
 				t.Fatal("the handler returned before its close was answered")
 			case <-time.After(200 * time.Millisecond):
 			}
-			assert.False(t, h.guestTracker().wait(0), "the session's end would not wait for the handler")
+			assert.False(t, h.guestTracker(guest).wait(0), "the session's end would not wait for the handler")
 
 			close(guest.winCh) // the far side answers the close
 			select {

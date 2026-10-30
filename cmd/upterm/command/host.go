@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	// Imported by non-test code on purpose: testing.Testing() is the
 	// designed way to ask whether this binary is a test binary, and since
 	// Go 1.13 importing the package registers no flags.
@@ -108,6 +109,7 @@ var (
 	flagProxy                   string
 	flagNoSFTP                  bool
 	flagAllowLocalTCPForwarding bool
+	flagAllowExec               bool
 	flagPtySize                 string
 	flagTerm                    string
 	flagName                    string
@@ -154,8 +156,10 @@ keys a guest must have.
 
 What guests may do: type into the session, or only watch it with
 --read-only; transfer files with sftp or scp, with your access (downloads
-only with --read-only, none with --no-sftp); and forward TCP ports (ssh -L)
-to what this machine can reach, only with --allow-local-tcp-forwarding.
+only with --read-only, none with --no-sftp); forward TCP ports (ssh -L) to
+what this machine can reach, only with --allow-local-tcp-forwarding; and run
+commands without a terminal (ssh SESSION 'cmd'), each in a process of its
+own, only with --allow-exec.
 Unless --accept, a guest's file transfers need your approval in a desktop
 dialog on this machine, which can allow the file asked about, or everything
 in that scp or sftp command; where no dialog can be shown, transfers are
@@ -230,6 +234,7 @@ reports the command's status.`,
 	cmd.PersistentFlags().StringVar(&flagProxy, "proxy", "", proxyHelp)
 	cmd.PersistentFlags().BoolVar(&flagNoSFTP, "no-sftp", false, "Turn off file transfer (sftp and scp) for guests. Without it, guests transfer files with your access (downloads only with --read-only), and unless --accept, a guest's "+transferApprovalHelp+"; "+transferDeniedHelp+".")
 	cmd.PersistentFlags().BoolVar(&flagAllowLocalTCPForwarding, "allow-local-tcp-forwarding", false, "Let guests forward TCP ports (ssh -L) through the session, to whatever this machine can reach. Can't be used with --read-only.")
+	cmd.PersistentFlags().BoolVar(&flagAllowExec, "allow-exec", false, "Let guests run commands without a terminal (ssh SESSION 'cmd'), each through $SHELL -c in a process of its own, with your access: what it prints and its exit status are the guest's, and it doesn't touch the session's terminal. For scripts and agents, which can't drive a shared terminal. Can't be used with --read-only or --force-command, and not on Windows.")
 	cmd.PersistentFlags().StringVar(&flagPtySize, "pty-size", "", "Pin the session's terminal size as COLSxROWS (e.g. 132x43); resize requests are then ignored. Defaults to the attached terminal's size, or 80x24 when there is none.")
 	cmd.PersistentFlags().StringVar(&flagTerm, "term", "", "Set TERM for the hosted command. Defaults to the inherited TERM, or "+defaultTerm+" when TERM is unset or "+dumbTerm+".")
 	cmd.PersistentFlags().StringVar(&flagName, "name", "", "Name the session, for upterm attach and the session commands to find it by. Defaults to the command's name and four hex digits, e.g. bash-1f3a.")
@@ -414,6 +419,29 @@ func validateReadOnlyForwarding(readOnly, forwarding bool) error {
 	return nil
 }
 
+func validateReadOnlyExec(readOnly, allowExec bool) error {
+	if readOnly && allowExec {
+		return errors.New("--read-only and --allow-exec cannot be used together: a read-only session must not run guests' commands")
+	}
+	return nil
+}
+
+func validateForceCommandExec(forceCommand string, allowExec bool) error {
+	if forceCommand != "" && allowExec {
+		return errors.New("--force-command and --allow-exec cannot be used together: a forced command decides what every guest runs")
+	}
+	return nil
+}
+
+// validateExecPlatform refuses --allow-exec where a guest's command has no
+// shell to run through: a Windows host's takes no -c.
+func validateExecPlatform(goos string, allowExec bool) error {
+	if goos == "windows" && allowExec {
+		return errors.New("--allow-exec is not supported on Windows")
+	}
+	return nil
+}
+
 func validateDetachAccept(detach, accept bool) error {
 	if detach && !accept {
 		return errors.New("--detach requires --accept: a session nobody is watching cannot be confirmed interactively")
@@ -477,6 +505,16 @@ func validateShareRequiredFlags(c *cobra.Command, args []string) error {
 	}
 
 	if err := validateReadOnlyForwarding(flagReadOnly, flagAllowLocalTCPForwarding); err != nil {
+		result = multierror.Append(result, err)
+	}
+
+	if err := validateReadOnlyExec(flagReadOnly, flagAllowExec); err != nil {
+		result = multierror.Append(result, err)
+	}
+	if err := validateForceCommandExec(flagForceCommand, flagAllowExec); err != nil {
+		result = multierror.Append(result, err)
+	}
+	if err := validateExecPlatform(runtime.GOOS, flagAllowExec); err != nil {
 		result = multierror.Append(result, err)
 	}
 

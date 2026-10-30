@@ -356,6 +356,20 @@ ssh -L 5555:127.0.0.1:8080 SESSION_SSH_USER@uptermd.upterm.dev
 
 After the first successful forward, the guest appears in session info and join/leave notifications until its SSH connection closes, even between forwarding channels. It is listed as `jump`, followed by where its forwards go, such as `→ 127.0.0.1:8080`: each distinct destination once, up to 16, then how many more forwards it opened, to anywhere else (`(+N more forwards)`). `--hide-client-ip`, and CI, hide the destinations along with the address. Multiple forwards on that connection share one entry; terminal and SFTP sessions retain their own entries. Forwarding alone does not set `firstGuestJoinedAt` or satisfy `--join-timeout`: an accepted terminal or SFTP session must join before that deadline. An idle `ssh -N` connection or a failed forward does not appear.
 
+### Guest Commands (`--allow-exec`)
+
+A program can't drive a shared terminal: a script, or an AI agent, needs each command to be a request with its own output and exit status. With `--allow-exec`, a guest that runs `ssh` with a command and no terminal gets exactly that:
+
+```console
+upterm host --allow-exec
+ssh SESSION_SSH_USER@uptermd.upterm.dev 'cd src && make test 2>&1 | tail -20'
+echo $?   # the command's own status
+```
+
+Each command runs through the host's `$SHELL -c`, as `sshd` runs one, in a process of its own with the host's access and environment; the session's terminal is untouched, and guests watching it don't see the command. Its stdout and stderr are the guest's, its stdin is the guest's input up to EOF, and its status is the guest's (128+N when signal N killed it). The guest leaving, or the session ending, hangs up the command and everything it started. An exec guest counts as a guest that joined, like a terminal or SFTP guest, so it satisfies `--join-timeout`. `ssh -t SESSION 'cmd'` still joins the shared terminal, as before. `--allow-exec` can't be combined with `--read-only` or `--force-command`, and isn't supported on Windows hosts. Without it, a command with no terminal is refused.
+
+For many commands in a row, reuse one connection (`-o ControlMaster=auto -o ControlPath=~/.ssh/upterm-%C -o ControlPersist=10m`): each command is then a channel on it rather than a new handshake through the relay. Files go over `scp` or `sftp`, as for any guest.
+
 ### WebSocket Connection
 
 In scenarios where your host restricts ssh transport, establish a connection to `uptermd.upterm.dev` (or your self-hosted server) via WebSocket:
